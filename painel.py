@@ -105,7 +105,17 @@ col1, col2, col3 = st.columns(3)
 with col1:
     cat = st.multiselect("🏛️ Categoria", ["Público","Privado"], key="categoria_sel")
     if cat:
-        df = df[df["Categoria"].isin(cat)]
+        # normaliza as tags escolhidas
+        norm_sel = [normalizar_texto(c) for c in cat]
+
+        # aplica normalização na coluna e testa se todas as tags estão presentes
+        norm_cat_series = df["Categoria"].apply(normalizar_texto)
+        mask = pd.Series(True, index=df.index)
+        for nc in norm_sel:
+            mask &= norm_cat_series.str.contains(nc, na=False)
+
+        df = df[mask]
+
 with col2:
     publicos = sorted({p.strip() for val in df["Público"].dropna() for p in str(val).replace(';',',').split(',') if p.strip()})
     pub = st.multiselect("👥 Público", publicos, key="publico_sel")
