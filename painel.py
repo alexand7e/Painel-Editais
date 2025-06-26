@@ -1,49 +1,69 @@
 import os, base64
 import streamlit as st
 import pandas as pd
+import unicodedata
 
-# ── CONFIG BÁSICA ────────────────────────────────────
+# ── CONFIG BÁSICA ───────────────────────────────────
 st.set_page_config(page_title="Painel de Editais", page_icon="📄", layout="wide")
 
+# ── CSS CUSTOMIZADO ─────────────────────────────────
 st.markdown(
     """
     <style>
+    /* Estilo geral */
     .stApp { background:#fff; color:#000; }
+    .header { display:flex; justify-content: space-between; align-items: flex-start; }
+    .header img { height: 100px; width: auto; }
+    .stButton > button { background-color: white !important; color: black !important; border:1px solid #ddd !important; border-radius:4px !important; }
+    .stMultiSelect label { color: #000 !important; }
 
-    .header { display:flex; justify-content:space-between; align-items:flex-start; }
-    .header img { height:100px; }
-
-    /* Forçar cor preta em todos os textos */
-    .stMarkdown, .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
-        color: #000 !important;
+    /* Estilo dos cards usando <details> */
+    details.edital-card {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 12px;
+        margin: 20px 0 !important;
     }
-
-    /* Manter cores originais nos multiselect */
-    .stMultiSelect label, .stMultiSelect > div > div {
-        color: inherit !important;
+    details.edital-card summary {
+        list-style: none;
+        outline: none;
+        cursor: pointer;
+        padding: 20px;
+        margin: 0;
+        display: block;
     }
-
-    /* Cor preta para outros elementos */
-    .stText, .stSubText, div[data-testid="stMarkdownContainer"] {
-        color: #000 !important;
+    details.edital-card summary::-webkit-details-marker {
+        display: none;
     }
-
-    /* Estilo do botão Limpar */
-    .stButton > button {
-        background-color: white !important;
-        color: black !important;
-        border: 1px solid #ddd !important;
-        border-radius: 4px !important;
+    details.edital-card summary h3 {
+        margin: 0 0 10px 0;
     }
-    .stButton > button:hover {
-        background-color: #ff4444 !important;
-        color: white !important;
-        border: 1px solid #ff4444 !important;
+    details.edital-card summary ul {
+        margin: 0;
+        padding: 0;
+    }
+    details.edital-card summary li {
+        margin-bottom: 4px;
+    }
+    details.edital-card .details-list {
+        padding: 0 20px 20px 20px;
+        margin: 0;
+    }
+    details.edital-card .details-list li {
+        margin-bottom: 4px;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
+
+# ── FUNÇÃO PARA NORMALIZAR TEXTO ─────────────────────────────────
+def normalizar_texto(texto):
+    if pd.isna(texto) or texto == '—':
+        return texto
+    texto_sem_acento = unicodedata.normalize('NFD', str(texto))
+    texto_sem_acento = ''.join(char for char in texto_sem_acento if unicodedata.category(char) != 'Mn')
+    return texto_sem_acento.lower().strip()
 
 # ── LOGO ─────────────────────────────────────────────
 logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
@@ -56,104 +76,91 @@ else:
 st.markdown(f"""
 <div class="header">
   <div>
-    <h2>🎯 Painel de Editais do Brasil</h2>
-    <p>Use os filtros abaixo e veja instantaneamente os editais que batem.</p>
+    <h2> Painel de Editais do Piauí</h2>
   </div>
   {'<img src="data:image/png;base64,'+logo_base64+'" alt="Logo">' if logo_base64 else ''}
 </div>
 """, unsafe_allow_html=True)
 
-# ── DADOS FICTÍCIOS ─────────────────────────────────
-editais = [
-    {"Título": "Edital de Pesquisa CAPES 2025",          "Público-alvo": "Pesquisadores", "Categoria": "Pesquisa",   "Área": "Educação"},
-    {"Título": "Inovação para Startups 2024",            "Público-alvo": "Empresas",      "Categoria": "Inovação",   "Área": "Tecnologia"},
-    {"Título": "Edital FINEP Saúde Pública",             "Público-alvo": "Pesquisadores", "Categoria": "Saúde",      "Área": "Saúde"},
-    {"Título": "Programa Nacional Jovem Cientista",      "Público-alvo": "Estudantes",    "Categoria": "Pesquisa",   "Área": "Multidisciplinar"},
-    {"Título": "Desenv. Sustentável Rural",              "Público-alvo": "Cooperativas",  "Categoria": "Inovação",   "Área": "Meio Ambiente"},
-    {"Título": "Conecta Brasil – Educação Digital",      "Público-alvo": "Escolas",       "Categoria": "Tecnologia", "Área": "Educação"},
-]
-df = pd.DataFrame(editais)
+# ── CARREGAMENTO E TRATAMENTO DOS DADOS ─────────────────────────────────
+df = pd.read_excel("Editais.xlsx")
+df = df.rename(columns={'Editais': 'Título'})
+required_columns = ["Título", "Categoria", "Público", "Área"]
+if any(col not in df.columns for col in required_columns):
+    st.error("❌ Algumas colunas necessárias não foram encontradas!")
+    st.stop()
+for col in df.columns:
+    df[col] = df[col].astype(str).replace(['nan','None','NaN','null',''], '—').fillna('—').str.strip()
 
-# ── FUNÇÃO DE LIMPAR FILTROS ─────────────────────────
+# ── FUNÇÃO PARA LIMPAR FILTROS ─────────────────────────
 def clear_filters():
-    for key in ("cats_sel", "pubs_sel", "areas_sel"):
-        st.session_state[key] = []
+    for k in ("categoria_sel", "publico_sel", "area_sel"):
+        if k in st.session_state:
+            st.session_state[k] = []
 
-# ── FILTROS + BOTÃO LIMPAR ──────────────────────────
-st.markdown("### 🔍 Filtros")
-
-# Botão vem primeiro; on_click executa antes dos widgets
+# ── FILTROS ────────────────────────────────────────
+st.markdown("---")
 st.button("🔄 Limpar todos os filtros", on_click=clear_filters)
-
 col1, col2, col3 = st.columns(3)
-
-# --- Categoria -------------------------------------------------
 with col1:
-    categorias_disponiveis = sorted(df["Categoria"].unique())
-    cats_escolhidas = st.multiselect(
-        "🏷️ Categoria",
-        categorias_disponiveis,
-        key="cats_sel"
-    )
-
-df_cat = df[df["Categoria"].isin(cats_escolhidas)] if cats_escolhidas else df.copy()
-
-# --- Público-alvo ---------------------------------------------
+    cat = st.multiselect("🏛️ Categoria", ["Público","Privado"], key="categoria_sel")
+    if cat:
+        df = df[df["Categoria"].isin(cat)]
 with col2:
-    publicos_disponiveis = sorted(df_cat["Público-alvo"].unique())
-    pubs_escolhidos = st.multiselect(
-        "👥 Público-alvo",
-        publicos_disponiveis,
-        key="pubs_sel"
-    )
-
-df_pub = df_cat[df_cat["Público-alvo"].isin(pubs_escolhidos)] if pubs_escolhidos else df_cat.copy()
-
-# --- Área ------------------------------------------------------
+    publicos = sorted({p.strip() for val in df["Público"].dropna() for p in str(val).replace(';',',').split(',') if p.strip()})
+    pub = st.multiselect("👥 Público", publicos, key="publico_sel")
+    if pub:
+        df = df[df["Público"].apply(lambda x: all(item.lower() in x.lower() for item in pub))]
 with col3:
-    areas_disponiveis = sorted(df_pub["Área"].unique())
-    areas_escolhidas = st.multiselect(
-        "📚 Área",
-        areas_disponiveis,
-        key="areas_sel"
-    )
+    areas = {normalizar_texto(a.strip()): a.title() for val in df["Área"].dropna() if val!='—' for a in str(val).split(',') if a.strip()}
+    area_sel = st.multiselect("📚 Área", sorted(areas.values()), key="area_sel")
+    if area_sel:
+        df = df[df["Área"].apply(lambda v: all(normalizar_texto(a) in [normalizar_texto(x) for x in str(v).split(',')] for a in area_sel))]
 
-df_final = (
-    df_pub[df_pub["Área"].isin(areas_escolhidas)]
-    if areas_escolhidas
-    else df_pub.copy()
-)
-
-# ── RESULTADO ───────────────────────────────────────
+# ── RESULTADOS ───────────────────────────────────
 st.markdown("---")
 st.markdown("### 📄 Editais Encontrados")
+st.markdown(f"📊 {len(df)} editais correspondem aos filtros")
 
-total_editais = len(df)
-editais_filtrados = len(df_final)
+detail_labels = {
+    'Fonte': '📰 Fonte',
+    'Objetivo': '🎯 Objetivo',
+    'Requisitos': '✅ Requisitos',
+    'Público-Alvo': '🎯 Público-Alvo',
+    'Prazo': '⏰ Prazo',
+    'Recursos': '💰 Recursos',
+    'Link do edital': '🔗 Link do Edital'
+}
 
-st.markdown(f"""
-<div style="background-color: #f0f8ff; padding: 10px; border-radius: 5px; border-left: 4px solid #0066cc;">
-    <strong style="color: #0066cc; font-size: 16px;">📊 {editais_filtrados} de {total_editais} editais correspondem aos filtros</strong>
-</div>
-""", unsafe_allow_html=True)
-
-if df_final.empty:
-    st.error("🔍 Nenhum edital encontrado com os filtros atuais. Tente ajustar os critérios de busca.")
+if df.empty:
+    st.info("🔍 Nenhum edital encontrado com os filtros atuais.")
 else:
-    for _, row in df_final.iterrows():
-        st.markdown(f"""
-        <div style="background-color: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #28a745;">
-            <h4 style="color: #2c3e50; margin: 0 0 10px 0;">📄 {row['Título']}</h4>
-            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                <span style="background-color: #e3f2fd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-                    🏷️ {row['Categoria']}
-                </span>
-                <span style="background-color: #f3e5f5; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-                    👥 {row['Público-alvo']}
-                </span>
-                <span style="background-color: #e8f5e8; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-                    📚 {row['Área']}
-                </span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    for _, row in df.iterrows():
+        detalhes_html = ""
+        for col in df.columns:
+            if col in {"Título", "Categoria", "Público", "Área", "Órgãos"}:
+                continue
+            val = row[col]
+            if val and val != '—':
+                lbl = detail_labels.get(col, col)
+                if col == 'Link do edital':
+                    detalhes_html += f'<li><strong>{lbl}:</strong> <a href="{val}" target="_blank">Acessar edital</a></li>'
+                else:
+                    detalhes_html += f'<li><strong>{lbl}:</strong> {val}</li>'
+
+        card_html = f"""
+        <details class="edital-card">
+          <summary>
+            <h3>🏛️ {row['Título']}</h3>
+            <ul>
+              <li><strong>Categoria:</strong> {row['Categoria']}</li>
+              <li><strong>Público:</strong> {row['Público']}</li>
+              <li><strong>Área:</strong> {row['Área']}</li>
+            </ul>
+          </summary>
+          <ul class="details-list">
+            {detalhes_html}
+          </ul>
+        </details>
+        """
+        st.markdown(card_html, unsafe_allow_html=True)
